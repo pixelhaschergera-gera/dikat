@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diktat</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#667085;--bd:#d9dde3;--ac:#1f5eff;--rec:#d92d20}
+  @media (prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1d2026;--tx:#e8eaed;--mut:#98a2b3;--bd:#323741;--ac:#6b93ff;--rec:#f97066}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+  main{max-width:720px;margin:0 auto;padding:16px}
+  h1{font-size:1.25rem;margin:8px 0 16px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+  label{display:block;font-size:.8rem;color:var(--mut);margin-bottom:4px}
+  textarea,input,select{width:100%;font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px}
+  textarea{min-height:140px;resize:vertical}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>div{flex:1 1 200px}
+  button{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;padding:10px 14px;cursor:pointer}
+  button.primary{background:var(--ac);border-color:var(--ac);color:#fff}
+  #mic{width:72px;height:72px;border-radius:50%;font-size:28px;padding:0}
+  #mic.on{background:var(--rec);border-color:var(--rec);color:#fff;animation:p 1.2s infinite}
+  @keyframes p{50%{opacity:.6}}
+  .bar{display:flex;align-items:center;gap:14px}
+  .hint{color:var(--mut);font-size:.85rem}
+  .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  details summary{cursor:pointer;color:var(--mut)}
+  .ok{color:#067647}
+</style>
+</head>
+<body>
+<main>
+  <h1>Diktat <span class="hint" style="font-weight:400">· Version 0.5 (08.11.2026)</span></h1>
+
+  <div class="card">
+    <div class="bar">
+      <button id="mic" title="Aufnahme starten/stoppen" aria-label="Aufnahme">🎤</button>
+      <div>
+        <div id="status">Bereit. Zum Starten auf das Mikrofon tippen.</div>
+        <div class="hint">Satz beenden: „Punkt“ sagen. Außerdem „Komma“, „Fragezeichen“, „neuer Absatz“.</div>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button id="pipBtn" hidden>🪟 Schwebendes Mikro öffnen</button>
+      <span class="hint" id="pipHint"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="head"><label for="raw" style="margin:0">Text (editierbar)</label><span><button id="copy">📋 Kopieren</button> <button id="clearRaw">Leeren</button></span></div>
+    <textarea id="raw" style="min-height:260px" placeholder="Hier erscheint dein Diktat. Nach dem Stoppen wird der Text automatisch aufbereitet."></textarea>
+    <div id="copied" class="hint ok" aria-live="polite"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div><label for="anrede">Anrede</label>
+        <select id="anrede">
+          <option value="Sehr geehrte Damen und Herren,">Sehr geehrte Damen und Herren,</option>
+          <option value="Sehr geehrter Herr {n},">Sehr geehrter Herr …,</option>
+          <option value="Sehr geehrte Frau {n},">Sehr geehrte Frau …,</option>
+          <option value="Hallo {n},">Hallo …,</option>
+          <option value="Guten Tag {n},">Guten Tag …,</option>
+          <option value="">Keine Anrede</option>
+        </select></div>
+      <div><label for="name">Name (für „…“)</label><input id="name" placeholder="z. B. Müller"></div>
+    </div>
+    <div style="margin-top:12px" class="row">
+      <button id="make">Text neu aufbereiten</button>
+    </div>
+    <div class="hint" id="modeInfo" style="margin-top:8px"></div>
+  </div>
+
+  <details class="card">
+    <summary>Einstellungen (optional: KI-Glättung)</summary>
+    <p class="hint">Ohne Schlüssel arbeitet die Aufbereitung rein lokal und regelbasiert (Füllwörter raus, Satzanfänge groß, Satzzeichen, Anrede). Mit einem Anthropic-API-Schlüssel formuliert eine KI den Text zusätzlich sauber im Geschäftston um. Der Schlüssel wird nur in diesem Browser gespeichert. Diktierte Texte werden nirgends gespeichert.</p>
+    <label for="key">Anthropic-API-Schlüssel</label>
+    <input id="key" type="password" autocomplete="off" placeholder="sk-ant-…">
+    <label style="margin-top:10px"><input type="checkbox" id="cmds" checked style="width:auto"> Gesprochene Satzzeichen-Befehle umsetzen</label>
+  </details>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const store = {
+  get(k){ try { return localStorage.getItem(k) } catch { return null } },
+  set(k,v){ try { localStorage.setItem(k,v) } catch {} }
+};
+
+/* ---------- Einstellungen ---------- */
+["anrede","name","key"].forEach(id => {
+  const v = store.get("dk_"+id); if (v !== null) $(id).value = v;
+  $(id).addEventListener("change", () => { store.set("dk_"+id, $(id).value); updMode(); });
+});
+const cm = store.get("dk_cmds"); if (cm !== null) $("cmds").checked = cm === "1";
+$("cmds").addEventListener("change", () => store.set("dk_cmds", $("cmds").checked ? "1":"0"));
+function updMode(){
+  $("modeInfo").textContent = $("key").value.trim()
+    ? "Modus: KI-Glättung (Text wird dafür an Anthropic gesendet)."
+    : "Modus: lokal, es wird nichts an eine KI gesendet.";
+}
+updMode();
+
+/* ---------- Spracherkennung ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false, finalText = "";
+const mic = $("mic"), status = $("status"), raw = $("raw");
+
+function setStatus(t){ status.textContent = t; }
+
+if (!SR) {
+  setStatus("Dieser Browser unterstützt keine Spracherkennung. Bitte Chrome oder Edge verwenden.");
+  mic.disabled = true;
+}
+
+function start(){
+  rec = new SR();
+  rec.lang = "de-DE";
+  rec.continuous = true;
+  rec.interimResults = true;
+  finalText = raw.value ? raw.value.trimEnd() + " " : "";
+  rec.onresult = e => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText += t.trim() + " "; else interim += t;
+    }
+    if ($("cmds").checked) finalText = applyCmds(finalText);
+    raw.value = $("cmds").checked ? applyCmds(finalText + interim) : finalText + interim;
+    raw.scrollTop = raw.scrollHeight;
+  };
+  rec.onerror = e => {
+    const m = { "not-allowed":"Mikrofonzugriff verweigert. Bitte im Browser erlauben.",
+                "service-not-allowed":"Spracherkennung ist hier nicht erlaubt.",
+                "no-speech":"Keine Sprache erkannt.",
+                "audio-capture":"Kein Mikrofon gefunden.",
+                "network":"Netzwerkfehler bei der Spracherkennung." };
+    setStatus(m[e.error] || ("Fehler: " + e.error));
+    if (e.error === "not-allowed" || e.error === "service-not-allowed" || e.error === "audio-capture") stop(true);
+  };
+  rec.onend = () => { if (listening) { try { rec.start() } catch {} } }; // Chrome beendet nach Pausen von selbst
+  try { rec.start(); } catch { return; }
+  listening = true; mic.classList.add("on"); mic.textContent = "⏹";
+  setStatus("Ich höre zu … zum Beenden erneut tippen.");
+  syncPip();
+}
+function stop(silent){
+  listening = false;
+  try { rec && rec.stop(); } catch {}
+  mic.classList.remove("on"); mic.textContent = "🎤";
+  if (!silent) setStatus("Aufnahme beendet.");
+  syncPip();
+}
+mic.addEventListener("click", () => listening ? finish() : start());
+function stopAndWait(){
+  return new Promise(res => {
+    if (!listening || !rec) { res(); return; }
+    listening = false;
+    mic.classList.remove("on"); mic.textContent = "🎤";
+    const t = setTimeout(res, 1500);
+    rec.onend = () => { clearTimeout(t); res(); };
+    try { rec.stop(); } catch { clearTimeout(t); res(); }
+    syncPip();
+  });
+}
+async function finish(){
+  await stopAndWait();
+  await build();
+  setStatus("Fertig. Text ist aufbereitet, mit „Kopieren“ übernehmen.");
+}
+$("clearRaw").addEventListener("click", () => { raw.value = ""; finalText = ""; });
+
+/* ---------- Lokale Aufbereitung ---------- */
+function applyCmds(t){
+  return t.replace(/\s+(neuer absatz|absatz)(?![A-Za-zÄÖÜäöüß])/gi, "\n\n")
+          .replace(/\s+neue zeile(?![A-Za-zÄÖÜäöüß])/gi, "\n")
+          .replace(/\s+komma(?![A-Za-zÄÖÜäöüß])/gi, ",")
+          .replace(/\s+punkt(?![A-Za-zÄÖÜäöüß])/gi, ".")
+          .replace(/\s+fragezeichen(?![A-Za-zÄÖÜäöüß])/gi, "?")
+          .replace(/\s+ausrufezeichen(?![A-Za-zÄÖÜäöüß])/gi, "!")
+          .replace(/\s+doppelpunkt(?![A-Za-zÄÖÜäöüß])/gi, ":")
+          .replace(/\s+(semikolon|strichpunkt)(?![A-Za-zÄÖÜäöüß])/gi, ";")
+          .replace(/ *\n */g, "\n");
+}
+
+function localClean(text, useCmds){
+  let t = " " + text.replace(/[ \t]+/g, " ") + " ";
+  if (useCmds) t = applyCmds(t);
+  // Füllwörter
+  t = t.replace(/(^|[\s,])(äh+m*|öh+m*|ähm+|hm+|hmm+|sozusagen|quasi)(?=[\s,.!?]|$)/gi, "$1");
+  t = t.replace(/\s+([,.;:!?])/g, "$1")      // Leerzeichen vor Satzzeichen
+       .replace(/([,;:])\s*(?=[,.;:!?])/g, "") // doppelte Zeichen
+       .replace(/[ \t]{2,}/g, " ")
+       .replace(/ *\n */g, "\n")
+       .trim();
+  t = autoCommas(t);
+  // Satzanfänge groß
+  t = t.replace(/(^|[.!?]\s+|\n)([a-zäöü])/g, (_, a, b) => a + b.toUpperCase());
+  // Schlusspunkt
+  t = t.split("\n").map(p => p && !/[.!?:,]$/.test(p) ? p + "." : p).join("\n");
+  return t;
+}
+
+/* Kommas vor Nebensatz-Einleitern (vorsichtig, nur eindeutige Wörter) */
+function autoCommas(t){
+  const W = "[A-Za-zÄÖÜäöüß]+";
+  const CONJ = "dass|weil|obwohl|sodass|ob|bevor|nachdem|falls|sondern|aber|jedoch|wenn";
+  const NOCOMMA = new Set(["und","oder","sowie","bzw","als","so","ohne","statt","anstatt","außer","sondern","nicht","wie"]);
+  const MOD = "auch|nur|selbst|sogar|erst|gerade|besonders";
+  // "auch wenn", "nur wenn" …: Komma vor dem Zusatzwort
+  t = t.replace(new RegExp("(" + W + ")([ ]+)(" + MOD + ")([ ]+wenn)(?![A-Za-zÄÖÜäöüß])", "g"),
+    (m, p, sp, mod, rest) => (NOCOMMA.has(p.toLowerCase()) || new RegExp("^(" + CONJ + ")$").test(p.toLowerCase())) ? m : p + "," + sp + mod + rest);
+  // Konjunktionen
+  t = t.replace(new RegExp("(" + W + ")([ ]+)(" + CONJ + ")(?![A-Za-zÄÖÜäöüß])", "g"),
+    (m, p, sp, c) => {
+      const pl = p.toLowerCase();
+      if (NOCOMMA.has(pl)) return m;
+      if (c === "wenn" && new RegExp("^(" + MOD + ")$").test(pl)) return m;
+      return p + "," + sp + c;
+    });
+  return t;
+}
+
+function greeting(){
+  const n = $("name").value.trim();
+  let a = $("anrede").value;
+  if (a.includes("{n}")) a = n ? a.replace("{n}", n) : a.replace(" {n}", "");
+  return a;
+}
+function wrap(body){
+  const a = greeting();
+  const parts = [];
+  if (a) parts.push(a);
+  parts.push(body.trim());
+  return parts.join("\n\n");
+}
+
+/* ---------- Optionale KI-Glättung ---------- */
+async function aiPolish(text, key){
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{
+      "content-type":"application/json",
+      "x-api-key":key,
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body: JSON.stringify({
+      model:"claude-haiku-5-5",
+      max_tokens:1500,
+      system:"Du überarbeitest diktierten deutschen Text zu einem sachlichen, höflichen, geschäftlichen E-Mail-Fließtext. Korrigiere Rechtschreibung, Zeichensetzung und Grammatik, entferne Füllwörter und Wiederholungen, behalte Inhalt, Fakten, Zahlen und Namen exakt bei und erfinde nichts. Keine Anrede, keine Grußformel, keine Erklärungen. Gib nur den überarbeiteten Text aus.",
+      messages:[{role:"user", content:text}]
+    })
+  });
+  if (!r.ok) throw new Error("KI-Dienst antwortete mit Status " + r.status);
+  const j = await r.json();
+  return (j.content || []).map(c => c.text || "").join("").trim();
+}
+
+$("make").addEventListener("click", () => build());
+async function build(){
+  if (listening) await stopAndWait();
+  let src = raw.value.trim();
+  const g = greeting();
+  if (g && src.startsWith(g)) src = src.slice(g.length).trim();   // Anrede nicht doppelt
+  if (!src) { setStatus("Noch kein Text vorhanden."); return; }
+  const cleaned = localClean(src, $("cmds").checked);
+  const key = $("key").value.trim();
+  let body = cleaned;
+  if (key) {
+    const btn = $("make"); btn.disabled = true; btn.textContent = "KI arbeitet …";
+    try { body = await aiPolish(cleaned, key); }
+    catch (e) { setStatus("KI-Glättung fehlgeschlagen (" + e.message + "). Lokale Version wird angezeigt."); }
+    btn.disabled = false; btn.textContent = "Text neu aufbereiten";
+  }
+  raw.value = wrap(body);
+  finalText = raw.value;
+}
+
+/* ---------- Schwebendes Mikro (Document Picture-in-Picture, nur Chrome/Edge am PC) ---------- */
+let pip = null;
+const PIPCSS = `
+  *{box-sizing:border-box}
+  body{margin:0;font:14px system-ui,Segoe UI,sans-serif;color:#e8eaed;background:linear-gradient(145deg,#1d2230,#0f1218);height:100vh;overflow:hidden}
+  .wrap{display:flex;align-items:center;gap:12px;padding:14px;height:100%}
+  #pm{width:68px;height:68px;flex:none;border-radius:50%;border:0;cursor:pointer;font-size:28px;color:#fff;
+      background:radial-gradient(circle at 30% 25%,#6b93ff,#1f5eff);box-shadow:0 6px 18px rgba(31,94,255,.45)}
+  #pm.on{background:radial-gradient(circle at 30% 25%,#ff8a80,#d92d20);box-shadow:0 0 0 0 rgba(217,45,32,.7);animation:pulse 1.4s infinite}
+  @keyframes pulse{70%{box-shadow:0 0 0 16px rgba(217,45,32,0)}100%{box-shadow:0 0 0 0 rgba(217,45,32,0)}}
+  .col{display:flex;flex-direction:column;gap:6px;min-width:0}
+  #ps{font-weight:600}
+  button.s{border:1px solid #3a4152;background:#232938;color:#e8eaed;border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit}
+  #res{display:none;flex-direction:column;gap:8px;padding:12px;height:100%}
+  #res.show{display:flex}
+  .wrap.hide{display:none}
+  #po{flex:1;width:100%;resize:none;border-radius:8px;border:1px solid #3a4152;background:#161a23;color:#e8eaed;padding:8px;font:inherit}
+  .r{display:flex;gap:8px}
+  .r .p{background:#1f5eff;border-color:#1f5eff}
+`;
+const pd = id => pip && pip.document.getElementById(id);
+
+function syncPip(){
+  if (!pip) return;
+  const m = pd("pm"); if (!m) return;
+  m.classList.toggle("on", listening);
+  pd("ps").textContent = listening ? "Aufnahme läuft" : "Bereit";
+  pd("px").style.display = listening ? "" : "none";
+}
+
+async function pipFinish(){
+  pd("ps").textContent = "Wird aufbereitet …";
+  await stopAndWait();
+  if (!raw.value.trim()) { syncPip(); return; }
+  await build();
+  if (!pip) return;
+  pd("po").value = raw.value;
+  pd("wrap").classList.add("hide");
+  pd("res").classList.add("show");
+  try { pip.resizeTo(340, 320); } catch {}
+}
+function pipReset(){
+  if (!pip) return;
+  pd("res").classList.remove("show");
+  pd("wrap").classList.remove("hide");
+  try { pip.resizeTo(250, 130); } catch {}
+  raw.value = ""; finalText = "";
+  syncPip();
+}
+
+async function openPip(){
+  if (pip) { pip.focus(); return; }
+  try {
+    pip = await documentPictureInPicture.requestWindow({ width: 250, height: 130 });
+  } catch (e) { $("pipHint").textContent = "Fenster konnte nicht geöffnet werden."; return; }
+  const d = pip.document;
+  d.title = "Diktat";
+  d.head.innerHTML = '<meta charset="utf-8"><style>' + PIPCSS + '</style>';
+  d.body.innerHTML =
+    '<div class="wrap" id="wrap"><button id="pm" aria-label="Aufnahme">🎤</button>' +
+    '<div class="col"><div id="ps">Bereit</div><button class="s" id="px" style="display:none">✕ Abbrechen</button></div></div>' +
+    '<div id="res"><textarea id="po" readonly></textarea>' +
+    '<div class="r"><button class="s p" id="pc">📋 Kopieren</button><button class="s" id="pn">Neu diktieren</button></div></div>';
+  pd("pm").onclick = () => { if (listening) pipFinish(); else { pipResetIfResult(); start(); } };
+  pd("px").onclick = () => { stop(true); raw.value = ""; finalText = ""; setStatus("Aufnahme abgebrochen."); syncPip(); };
+  pd("pn").onclick = () => { pipReset(); start(); };
+  pd("pc").onclick = async () => {
+    const v = pd("po").value; let ok = false;
+    try { await pip.navigator.clipboard.writeText(v); ok = true; }
+    catch { pd("po").select(); try { ok = pip.document.execCommand("copy"); } catch {} }
+    pd("pc").textContent = ok ? "✓ Kopiert" : "Strg+C drücken";
+    setTimeout(() => { if (pip) pd("pc").textContent = "📋 Kopieren"; }, 2500);
+  };
+  pip.addEventListener("pagehide", () => { pip = null; });
+  syncPip();
+}
+function pipResetIfResult(){ if (pip && pd("res").classList.contains("show")) pipReset(); }
+
+if ("documentPictureInPicture" in window) {
+  $("pipBtn").hidden = false;
+  $("pipBtn").addEventListener("click", openPip);
+  $("pipHint").textContent = "Kleines Fenster, das über anderen Programmen bleibt. Dieses Tab darf nicht geschlossen werden.";
+}
+
+/* ---------- Kopieren ---------- */
+$("copy").addEventListener("click", async () => {
+  const v = raw.value; if (!v) return;
+  let ok = false;
+  try { await navigator.clipboard.writeText(v); ok = true; }
+  catch { raw.select(); try { ok = document.execCommand("copy"); } catch {} }
+  $("copied").textContent = ok ? "Kopiert. Jetzt in die E-Mail einfügen (Strg+V)." : "Kopieren nicht möglich, bitte Text markieren und Strg+C.";
+  setTimeout(() => $("copied").textContent = "", 4000);
+});
+</script>
+</body>
+</html>
