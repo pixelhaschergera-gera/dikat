@@ -31,7 +31,7 @@
 </head>
 <body>
 <main>
-  <h1>Diktat <span class="hint" style="font-weight:400">· Version 0.5 (08.11.2026)</span></h1>
+  <h1>Diktat <span class="hint" style="font-weight:400">· Version 0.6 (09.11.2026)</span></h1>
 
   <div class="card">
     <div class="bar">
@@ -250,7 +250,7 @@ async function aiPolish(text, key){
     body: JSON.stringify({
       model:"claude-haiku-5-5",
       max_tokens:1500,
-      system:"Du überarbeitest diktierten deutschen Text zu einem sachlichen, höflichen, geschäftlichen E-Mail-Fließtext. Korrigiere Rechtschreibung, Zeichensetzung und Grammatik, entferne Füllwörter und Wiederholungen, behalte Inhalt, Fakten, Zahlen und Namen exakt bei und erfinde nichts. Keine Anrede, keine Grußformel, keine Erklärungen. Gib nur den überarbeiteten Text aus.",
+      system:"Du überarbeitest diktierten deutschen Text zu einem sachlichen, höflichen, geschäftlichen E-Mail-Fließtext. Wende die aktuelle deutsche Rechtschreibung nach Duden an: Groß- und Kleinschreibung (alle Substantive und Nominalisierungen großschreiben, Satzanfänge groß), Zeichensetzung inklusive Kommas nach den Regeln, Grammatik. Ergänze fehlende Satzzeichen und setze sinnvolle Satzgrenzen. Entferne Füllwörter und Wiederholungen. Behalte Inhalt, Fakten, Zahlen, Namen, Anrede-Form (Sie/Du) und Absätze exakt bei und erfinde nichts. Keine Anrede, keine Grußformel, keine Erklärungen. Gib nur den überarbeiteten Text aus.",
       messages:[{role:"user", content:text}]
     })
   });
